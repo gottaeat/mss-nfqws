@@ -1,0 +1,49 @@
+#!/bin/sh /etc/rc.common
+# cd /bin/; wget https://github.com/bol-van/zapret/raw/master/binaries/mips32r1-lsb/nfqws
+# opkg install kmod-nft-queue
+# cd /etc/init.d; ./zapret enable; ./zapret start
+
+START=21
+STOP=89
+
+iface="$(grep 00000000 /proc/net/route | awk 'NR==1 {print $1}')"
+#iface="pppoe-wan"
+
+start(){
+    nft add table inet myfilter
+
+    nft 'create chain inet myfilter nfqws {\
+         type filter hook postrouting priority mangle;\
+         policy accept;\
+        }'
+
+    nft add rule inet myfilter nfqws \
+        oifname "${iface}" tcp dport \{80,443\} \
+        ct original packets 1-4                 \
+        mark and 0x40000000 != 0x40000000       \
+        queue num 200 bypass
+
+    nfqws \
+        --uid=0:0                      \
+        --qnum=200                     \
+        --dpi-desync-fwmark=0x40000000 \
+        --wssize=1:6                   \
+        --hostcase                     \
+        --hostspell=hoST               \
+        --hostnospace                  \
+        --domcase                      \
+        --dpi-desync=fake              \
+        --dpi-desync-fooling=md5sig    \
+        --dpi-desync-retrans=1         \
+        --dpi-desync-skip-nosni=0      \
+        --dpi-desync-ttl=6 >/dev/null 2>&1 &
+}
+
+stop(){
+    nft flush chain inet myfilter nfqws
+    nft delete table inet myfilter
+
+    for i in `pidof nfqws`; do
+        kill -KILL "${i}"
+    done
+}

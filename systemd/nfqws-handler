@@ -1,0 +1,40 @@
+#!/bin/sh
+nfqwspid="$(pidof nfqws)"
+iface="$(grep 00000000 /proc/net/route | awk 'NR==1 {print $1}')"
+
+case "$1" in
+    start)
+        nft 'create chain inet myfilter nfqws {\
+            type filter hook postrouting priority mangle;\
+            policy accept;\
+            }'
+
+        nft add rule inet myfilter nfqws \
+            oifname "${iface}" tcp dport \{80,443\} \
+            ct original packets 1-4                 \
+            mark and 0x40000000 != 0x40000000       \
+            queue num 200 bypass
+
+        nfqws \
+            --uid=0:0                      \
+            --qnum=200                     \
+            --dpi-desync-fwmark=0x40000000 \
+            --wssize=1:6                   \
+            --hostcase                     \
+            --hostspell=hoST               \
+            --hostnospace                  \
+            --domcase                      \
+            --dpi-desync=fake              \
+            --dpi-desync-fooling=md5sig    \
+            --dpi-desync-retrans=1         \
+            --dpi-desync-skip-nosni=0      \
+            --dpi-desync-ttl=6 >/dev/null 2>&1 &
+    ;;
+    stop)
+        nft flush chain inet myfilter nfqws
+
+        for i in ${nfqwspid}; do
+            kill -TERM "${i}" || kill -KILL "${i}"
+        done
+    ;;
+esac

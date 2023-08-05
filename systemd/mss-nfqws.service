@@ -1,0 +1,17 @@
+[Unit]
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+Restart=no
+TimeoutSec=30sec
+IgnoreSIGPIPE=no
+KillMode=none
+GuessMainPID=no
+RemainAfterExit=no
+ExecStart=/usr/share/mss-nfqws/nfqws-handler start
+ExecStop=/usr/share/mss-nfqws/nfqws-handler stop
+
+[Install]
+WantedBy=multi-user.target

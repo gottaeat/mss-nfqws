@@ -1,4 +1,4 @@
-project('nfqws',
+project('mss-nfqws',
         'c',
         version: 'd5b104d7',
         license: 'MIT',
@@ -76,9 +76,18 @@ executable('nfqws',
 openwrt = get_option('openwrt')
 if openwrt
     install_data(
-        'init.d/zapret',
+        'init.d/mss-nfqws',
         install_dir: '/etc/init.d/'
         )
+else
+    install_data(
+        'systemd/mss-nfqws.service',
+        install_dir: '/usr/lib/systemd/system/'
+    )
+    install_data(
+        'systemd/nfqws-handler',
+        install_dir: '/usr/share/mss-nfqws'
+    )
 endif
 
 message('OPTS:')

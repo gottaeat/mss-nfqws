@@ -4,12 +4,12 @@ iface="$(grep 00000000 /proc/net/route | awk 'NR==1 {print $1}')"
 
 case "$1" in
     start)
-        nft 'create chain inet myfilter nfqws {\
+        nft 'create chain ip myfilter nfqws {\
             type filter hook postrouting priority mangle;\
             policy accept;\
             }'
 
-        nft add rule inet myfilter nfqws \
+        nft add rule ip myfilter nfqws \
             oifname "${iface}" tcp dport \{80,443\} \
             ct original packets 1-4                 \
             mark and 0x40000000 != 0x40000000       \
@@ -31,7 +31,7 @@ case "$1" in
             --dpi-desync-ttl=6 >/dev/null 2>&1 &
     ;;
     stop)
-        nft flush chain inet myfilter nfqws
+        nft flush chain ip myfilter nfqws
 
         for i in ${nfqwspid}; do
             kill -TERM "${i}" || kill -KILL "${i}"

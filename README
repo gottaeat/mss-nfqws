@@ -1,0 +1,6 @@
+mss-nfqws
+=========
+standalone nfqws utility from bol-van/zapret grafted at commit d5b104d7
+utilizing meson instead of Make, with OpenWRT and systemd service files.
+
+nfqws from the zapret suite authored by bol-van is licensed under MIT.

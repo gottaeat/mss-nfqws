@@ -4,3 +4,26 @@ standalone nfqws utility from bol-van/zapret grafted at commit d5b104d7
 utilizing meson instead of Make, with OpenWRT and systemd service files.
 
 nfqws from the zapret suite authored by bol-van is licensed under MIT.
+
+build instructions
+==================
+1. local build:
+---------------
+build-openwrt.sh
+
+2. docker
+---------
+docker build -t mss-owrt-ramips-mt7621 .
+
+docker run --rm \
+     -e MAKEFLAGS="-j$(nproc) V=sc" \
+     -v "${PWD}"/openwrt-feed/:/build/openwrt-feed \
+     -v "${PWD}"/bin:/build/bin \
+     mss-owrt-ramips-mt7621 \
+     bash -c "echo src-link local /build/openwrt-feed >> feeds.conf.default && \
+              ./scripts/feeds update packages base local && \
+              ./scripts/feeds install mss-nfqws && \
+              make defconfig && \
+              make package/mss-nfqws/compile"
+
+prebuilt binaries can be found in releases.

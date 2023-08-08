@@ -1,19 +1,19 @@
-FROM alpine:3.18.2 AS owrt-build
-
-ENV LANG=en_US.utf8
+FROM archlinux:latest AS owrt-build
 
 RUN \
-    apk --no-cache add \
-        argp-standalone asciidoc bash bc binutils bzip2 cdrkit coreutils \
-        diffutils elfutils-dev findutils flex g++ gawk gcc gettext git grep \
-        gzip intltool libxslt linux-headers make musl-fts-dev musl-libintl \
-        musl-obstack-dev ncurses-dev openssl-dev patch perl python3-dev rsync \
-        tar unzip util-linux wget zlib-dev
+    pacman-key --init && \
+    pacman-key --populate archlinux && \
+    pacman -Syu --noconfirm \
+        asciidoc autoconf automake base-devel bash binutils bison bzip2 \
+        fakeroot file findutils flex gawk gcc gettext git grep groff gzip \
+        help2man intltool libelf libtool libxslt m4 make ncurses openssl \
+        patch perl-extutils-makemaker pkgconf python rsync sed swig texinfo \
+        time unzip util-linux wget which zlib
 
 RUN \
-    wget https://archive.openwrt.org/releases/22.03.5/targets/ramips/mt7621/openwrt-sdk-22.03.5-ramips-mt7621_gcc-11.2.0_musl.Linux-x86_64.tar.xz && \
-    tar xf openwrt-sdk-22.03.5-ramips-mt7621_gcc-11.2.0_musl.Linux-x86_64.tar.xz && \
-    mv openwrt-sdk-22.03.5-ramips-mt7621_gcc-11.2.0_musl.Linux-x86_64/ /build
+    wget https://downloads.openwrt.org/releases/23.05.0-rc2/targets/ramips/mt7621/openwrt-sdk-23.05.0-rc2-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64.tar.xz && \
+    tar xf openwrt-sdk-23.05.0-rc2-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64.tar.xz && \
+    mv openwrt-sdk-23.05.0-rc2-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64/ /build
 
 WORKDIR /build
 CMD ["/bin/bash"]

@@ -8,22 +8,36 @@ unit file.
 
 build instructions
 ==================
-1. local build:
-build-openwrt.sh
+1. local
+--------
+./build-openwrt.sh
 
 2. docker
+---------
+# if the compilation is noticably slower than the local build with the shell
+# script up above, that mostly likely is due to the fakeroot process within the
+# container choking up, you might want to add:
+#   --ulimit "nofile=1024:524288"
+# to your docker run args, or change the line
+#   LimitNOFILE=infinity
+# to
+#   LimitNOFILE=1024:524288
+# for docker and containerd systemd service files. to learn more, refer to:
+#   https://github.com/moby/moby/issues/38814
+
 docker build -t mss-owrt-ramips-mt7621 .
 
 docker run --rm \
-     -e MAKEFLAGS="-j$(nproc) V=sc" \
-     -v "${PWD}"/openwrt-feed/:/build/openwrt-feed \
-     -v "${PWD}"/bin:/build/bin \
-     mss-owrt-ramips-mt7621 \
-     bash -c "echo src-link local /build/openwrt-feed >> feeds.conf.default && \
-              ./scripts/feeds update packages base local && \
-              ./scripts/feeds install mss-nfqws && \
-              make defconfig && \
-              make package/mss-nfqws/compile"
+    -e MAKEFLAGS="-j$(nproc)"                     \
+    -v "${PWD}"/openwrt-feed/:/build/openwrt-feed \
+    -v "${PWD}"/bin:/build/bin                    \
+    mss-owrt-ramips-mt7621                        \
+    bash -c \
+        "echo src-link local /build/openwrt-feed >> feeds.conf.default && \
+         ./scripts/feeds update packages base local                    && \
+         ./scripts/feeds install mss-nfqws                             && \
+         make defconfig                                                && \
+         make package/mss-nfqws/compile"
 
 prebuilts
 =========

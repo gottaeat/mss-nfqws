@@ -5,10 +5,10 @@ _FEED_PATH="${PWD}"/openwrt-feed
 mkdir build/
 cd    build/
 
-curl -L -O https://downloads.openwrt.org/snapshots/targets/ramips/mt7621/openwrt-sdk-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+curl -L -O https://downloads.openwrt.org/releases/22.03.5/targets/ramips/mt7621/openwrt-sdk-22.03.5-ramips-mt7621_gcc-11.2.0_musl.Linux-x86_64.tar.xz
 
-tar xf openwrt-sdk-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-cd     openwrt-sdk-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64/
+tar xf openwrt-sdk-22.03.5-ramips-mt7621_gcc-11.2.0_musl.Linux-x86_64.tar.xz
+cd     openwrt-sdk-22.03.5-ramips-mt7621_gcc-11.2.0_musl.Linux-x86_64/
 
 echo "src-link local ${_FEED_PATH}" >> feeds.conf.default
 ./scripts/feeds update packages base local

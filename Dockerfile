@@ -11,9 +11,9 @@ RUN \
         time unzip util-linux wget which zlib
 
 RUN \
-    wget https://downloads.openwrt.org/snapshots/targets/ramips/mt7621/openwrt-sdk-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64.tar.xz && \
-    tar xf openwrt-sdk-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64.tar.xz && \
-    mv openwrt-sdk-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64/ /build
+    wget https://downloads.openwrt.org/releases/22.03.5/targets/ramips/mt7621/openwrt-sdk-22.03.5-ramips-mt7621_gcc-11.2.0_musl.Linux-x86_64.tar.xz && \
+    tar xf openwrt-sdk-22.03.5-ramips-mt7621_gcc-11.2.0_musl.Linux-x86_64.tar.xz && \
+    mv openwrt-sdk-22.03.5-ramips-mt7621_gcc-11.2.0_musl.Linux-x86_64/ /build
 
 WORKDIR /build
 CMD ["/bin/bash"]

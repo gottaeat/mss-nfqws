@@ -41,5 +41,6 @@ docker run --rm \
 
 prebuilts
 =========
-ramips-mt7621 builds targeting openwrt 22.03.5 and 23.05.0-rc2 can be found
+ramips-mt7621 builds targeting openwrt 22.03.5, 23.05.0-rc2 and whatever the
+latest snapshot at the time i was ruining the spi on this trashfire can be found
 under releases.

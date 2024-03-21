@@ -15,7 +15,7 @@ mt7621 target. if what you're building for differs, please alter as needed.
 git clone --depth=1 https://github.com/gottaeat/mss-nfqws
 cd mss-nfqws/
 
-docker built -t mss-owrt-ramips-mt7621 .
+docker build -t mss-owrt-ramips-mt7621 .
 
 docker run --rm \
     -e MAKEFLAGS="-j$(nproc)"                     \

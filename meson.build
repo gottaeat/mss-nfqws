@@ -1,6 +1,6 @@
 project('mss-nfqws',
         'c',
-        version: 'd5b104d7',
+        version: '3558e7c8',
         license: 'MIT',
         default_options: [
             'buildtype=plain',
@@ -45,9 +45,9 @@ nfq_src = [
     'src/helpers.c',
     'src/hostlist.c',
     'src/nfqws.c',
+    'src/pools.c',
     'src/protocol.c',
-    'src/sec.c',
-    'src/strpool.c'
+    'src/sec.c'
     ]
 
 # set bindir

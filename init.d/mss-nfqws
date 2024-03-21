@@ -10,14 +10,14 @@ iface="$(grep 00000000 /proc/net/route | awk 'NR==1 {print $1}')"
 #iface="pppoe-wan"
 
 start(){
-    nft add table inet myfilter
+    nft add table inet mss-nfqws
 
-    nft 'create chain inet myfilter nfqws {\
+    nft 'create chain inet mss-nfqws nfq {\
          type filter hook postrouting priority mangle;\
          policy accept;\
         }'
 
-    nft add rule inet myfilter nfqws \
+    nft add rule inet mss-nfqws nfq \
         oifname "${iface}" tcp dport \{80,443\} \
         ct original packets 1-4                 \
         mark and 0x40000000 != 0x40000000       \
@@ -36,12 +36,12 @@ start(){
         --dpi-desync-fooling=md5sig    \
         --dpi-desync-retrans=1         \
         --dpi-desync-skip-nosni=0      \
-        --dpi-desync-ttl=6 >/dev/null 2>&1 &
+        --dpi-desync-ttl=6             \
+        --daemon
 }
 
 stop(){
-    nft flush chain inet myfilter nfqws
-    nft delete table inet myfilter
+    nft delete table inet mss-nfqws
 
     for i in `pidof nfqws`; do
         kill -KILL "${i}"

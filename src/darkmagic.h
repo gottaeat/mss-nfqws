@@ -11,6 +11,17 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+#ifndef IPPROTO_DIVERT
+#define IPPROTO_DIVERT 258
+#endif
+
+#ifndef AF_DIVERT
+#define	AF_DIVERT	44	/* divert(4) */
+#endif
+#ifndef PF_DIVERT
+#define PF_DIVERT AF_DIVERT
+#endif
+
 // returns netorder value
 uint32_t net32_add(uint32_t netorder_value, uint32_t cpuorder_increment);
 uint32_t net16_add(uint16_t netorder_value, uint16_t cpuorder_increment);
@@ -24,6 +35,7 @@ uint32_t net16_add(uint16_t netorder_value, uint16_t cpuorder_increment);
 #define FOOL_HOPBYHOP2	0x20
 #define FOOL_DESTOPT	0x40
 #define FOOL_IPFRAG1	0x80
+#define FOOL_DATANOACK	0x100
 
 #define SCALE_NONE ((uint8_t)-1)
 
@@ -36,7 +48,7 @@ bool prepare_tcp_segment4(
 	uint8_t scale_factor,
 	uint32_t *timestamps,
 	uint8_t ttl,
-	uint8_t fooling,
+	uint32_t fooling,
 	uint32_t badseq_increment,
 	uint32_t badseq_ack_increment,
 	const void *data, uint16_t len,
@@ -49,7 +61,7 @@ bool prepare_tcp_segment6(
 	uint8_t scale_factor,
 	uint32_t *timestamps,
 	uint8_t ttl,
-	uint8_t fooling,
+	uint32_t fooling,
 	uint32_t badseq_increment,
 	uint32_t badseq_ack_increment,
 	const void *data, uint16_t len,
@@ -62,7 +74,7 @@ bool prepare_tcp_segment(
 	uint8_t scale_factor,
 	uint32_t *timestamps,
 	uint8_t ttl,
-	uint8_t fooling,
+	uint32_t fooling,
 	uint32_t badseq_increment,
 	uint32_t badseq_ack_increment,
 	const void *data, uint16_t len,
@@ -72,21 +84,24 @@ bool prepare_tcp_segment(
 bool prepare_udp_segment4(
 	const struct sockaddr_in *src, const struct sockaddr_in *dst,
 	uint8_t ttl,
-	uint8_t fooling,
+	uint32_t fooling,
+	const uint8_t *padding, size_t padding_size,
 	int padlen,
 	const void *data, uint16_t len,
 	uint8_t *buf, size_t *buflen);
 bool prepare_udp_segment6(
 	const struct sockaddr_in6 *src, const struct sockaddr_in6 *dst,
 	uint8_t ttl,
-	uint8_t fooling,
+	uint32_t fooling,
+	const uint8_t *padding, size_t padding_size,
 	int padlen,
 	const void *data, uint16_t len,
 	uint8_t *buf, size_t *buflen);
 bool prepare_udp_segment(
 	const struct sockaddr *src, const struct sockaddr *dst,
 	uint8_t ttl,
-	uint8_t fooling,
+	uint32_t fooling,
+	const uint8_t *padding, size_t padding_size,
 	int padlen,
 	const void *data, uint16_t len,
 	uint8_t *buf, size_t *buflen);
@@ -109,20 +124,24 @@ bool ip_frag(
 	size_t frag_pos, uint32_t ident,
 	uint8_t *pkt1, size_t *pkt1_size,
 	uint8_t *pkt2, size_t *pkt2_size);
-
+	
+void rewrite_ttl(struct ip *ip, struct ip6_hdr *ip6, uint8_t ttl);
 
 void extract_ports(const struct tcphdr *tcphdr, const struct udphdr *udphdr, uint8_t *proto, uint16_t *sport, uint16_t *dport);
 void extract_endpoints(const struct ip *ip,const struct ip6_hdr *ip6hdr,const struct tcphdr *tcphdr,const struct udphdr *udphdr, struct sockaddr_storage *src, struct sockaddr_storage *dst);
 uint8_t *tcp_find_option(struct tcphdr *tcp, uint8_t kind);
 uint32_t *tcp_find_timestamps(struct tcphdr *tcp);
 uint8_t tcp_find_scale_factor(const struct tcphdr *tcp);
+bool tcp_has_fastopen(const struct tcphdr *tcp);
 
 // auto creates internal socket and uses it for subsequent calls
 bool rawsend(const struct sockaddr* dst,uint32_t fwmark,const char *ifout,const void *data,size_t len);
 // should pre-do it if dropping privileges. otherwise its not necessary
 bool rawsend_preinit(bool bind_fix4, bool bind_fix6);
 // cleans up socket autocreated by rawsend
-void rawsend_cleanup();
+void rawsend_cleanup(void);
+
+int socket_divert(sa_family_t family);
 
 const char *proto_name(uint8_t proto);
 uint16_t family_from_proto(uint8_t l3proto);
@@ -146,3 +165,15 @@ bool tcp_ack_segment(const struct tcphdr *tcphdr);
 // scale_factor=SCALE_NONE - do not change
 void tcp_rewrite_wscale(struct tcphdr *tcp, uint8_t scale_factor);
 void tcp_rewrite_winsize(struct tcphdr *tcp, uint16_t winsize, uint8_t scale_factor);
+
+typedef struct
+{
+	uint8_t delta, min, max;
+} autottl;
+#define AUTOTTL_DEFAULT_DELTA 1
+#define AUTOTTL_DEFAULT_MIN 3
+#define AUTOTTL_DEFAULT_MAX 20
+#define AUTOTTL_ENABLED(a) (!!(a).delta)
+#define AUTOTTL_SET_DEFAULT(a) {(a).delta=AUTOTTL_DEFAULT_DELTA; (a).min=AUTOTTL_DEFAULT_MIN; (a).max=AUTOTTL_DEFAULT_MAX;}
+
+uint8_t autottl_guess(uint8_t ttl, const autottl *attl);

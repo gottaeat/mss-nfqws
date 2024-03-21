@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <time.h>
 
 void hexdump_limited_dlog(const uint8_t *data, size_t size, size_t limit)
 {
@@ -82,6 +83,14 @@ bool save_file(const char *filename, const void *buffer, size_t buffer_size)
 	fclose(F);
 	return true;
 }
+bool append_to_list_file(const char *filename, const char *s)
+{
+	FILE *F = fopen(filename,"at");
+	if (!F) return false;
+	bool bOK = fprintf(F,"%s\n",s)>0;
+	fclose(F);
+	return bOK;
+}
 
 
 void ntop46(const struct sockaddr *sa, char *str, size_t len)
@@ -141,12 +150,12 @@ void dbgprint_socket_buffers(int fd)
 bool set_socket_buffers(int fd, int rcvbuf, int sndbuf)
 {
 	DLOG("set_socket_buffers fd=%d rcvbuf=%d sndbuf=%d\n", fd, rcvbuf, sndbuf)
-		if (rcvbuf && setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(int)) < 0)
-		{
-			perror("setsockopt (SO_RCVBUF)");
-			close(fd);
-			return false;
-		}
+	if (rcvbuf && setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(int)) < 0)
+	{
+		perror("setsockopt (SO_RCVBUF)");
+		close(fd);
+		return false;
+	}
 	if (sndbuf && setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(int)) < 0)
 	{
 		perror("setsockopt (SO_SNDBUF)");
@@ -178,4 +187,72 @@ void phton64(uint8_t *p, uint64_t v)
 	p[5] = (uint8_t)(v >> 16);
 	p[6] = (uint8_t)(v >> 8);
 	p[7] = (uint8_t)(v >> 0);
+}
+
+bool seq_within(uint32_t s, uint32_t s1, uint32_t s2)
+{
+	return s2>=s1 && s>=s1 && s<=s2 || s2<s1 && (s<=s2 || s>=s1);
+}
+
+bool ipv6_addr_is_zero(const struct in6_addr *a)
+{
+    return !memcmp(a,"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",16);
+}
+
+
+#define INVALID_HEX_DIGIT ((uint8_t)-1)
+static inline uint8_t parse_hex_digit(char c)
+{
+	return (c>='0' && c<='9') ? c-'0' : (c>='a' && c<='f') ? c-'a'+0xA : (c>='A' && c<='F') ? c-'A'+0xA : INVALID_HEX_DIGIT;
+}
+static inline bool parse_hex_byte(const char *s, uint8_t *pbyte)
+{
+	uint8_t u,l;
+	u = parse_hex_digit(s[0]);
+	l = parse_hex_digit(s[1]);
+	if (u==INVALID_HEX_DIGIT || l==INVALID_HEX_DIGIT)
+	{
+		*pbyte=0;
+		return false;
+	}
+	else
+	{
+		*pbyte=(u<<4) | l;
+		return true;
+	}
+}
+bool parse_hex_str(const char *s, uint8_t *pbuf, size_t *size)
+{
+	uint8_t *pe = pbuf+*size;
+	*size=0;
+	while(pbuf<pe && *s)
+	{
+		if (!parse_hex_byte(s,pbuf))
+			return false;
+		pbuf++; s+=2; (*size)++;
+	}
+	return true;
+}
+
+void fill_pattern(uint8_t *buf,size_t bufsize,const void *pattern,size_t patsize)
+{
+	size_t size;
+
+	while (bufsize)
+	{
+		size = bufsize>patsize ? patsize : bufsize;
+		memcpy(buf,pattern,size);
+		buf += size;
+		bufsize -= size;
+	}
+}
+
+int fprint_localtime(FILE *F)
+{
+	struct tm t;
+	time_t now;
+
+	time(&now);
+	localtime_r(&now,&t);
+	return fprintf(F, "%02d.%02d.%04d %02d:%02d:%02d", t.tm_mday, t.tm_mon + 1, t.tm_year + 1900, t.tm_hour, t.tm_min, t.tm_sec);
 }

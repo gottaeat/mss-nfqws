@@ -26,6 +26,7 @@ enum dpi_desync_mode {
 	DESYNC_RST,
 	DESYNC_RSTACK,
 	DESYNC_SYNACK,
+	DESYNC_SYNDATA,
 	DESYNC_DISORDER,
 	DESYNC_DISORDER2,
 	DESYNC_SPLIT,
@@ -34,7 +35,8 @@ enum dpi_desync_mode {
 	DESYNC_HOPBYHOP,
 	DESYNC_DESTOPT,
 	DESYNC_IPFRAG1,
-	DESYNC_UDPLEN
+	DESYNC_UDPLEN,
+	DESYNC_TAMPER
 };
 
 extern const char *fake_http_request_default;
@@ -48,6 +50,6 @@ bool desync_valid_second_stage(enum dpi_desync_mode mode);
 bool desync_valid_second_stage_tcp(enum dpi_desync_mode mode);
 bool desync_valid_second_stage_udp(enum dpi_desync_mode mode);
 
-void desync_init();
+void desync_init(void);
 packet_process_result dpi_desync_tcp_packet(uint32_t fwmark, const char *ifout, uint8_t *data_pkt, size_t len_pkt, struct ip *ip, struct ip6_hdr *ip6hdr, struct tcphdr *tcphdr, size_t len_tcp, uint8_t *data_payload, size_t len_payload);
 packet_process_result dpi_desync_udp_packet(uint32_t fwmark, const char *ifout, uint8_t *data_pkt, size_t len_pkt, struct ip *ip, struct ip6_hdr *ip6hdr, struct udphdr *udphdr, uint8_t *data_payload, size_t len_payload);

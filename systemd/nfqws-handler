@@ -30,7 +30,8 @@ case "$1" in
             --dpi-desync-fooling=md5sig    \
             --dpi-desync-retrans=1         \
             --dpi-desync-skip-nosni=0      \
-            --dpi-desync-ttl=6 >/dev/null 2>&1 &
+            --dpi-desync-ttl=6             \
+            --daemon
     ;;
     stop)
         nft delete table ip mss-nfqws || true

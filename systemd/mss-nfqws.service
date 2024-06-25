@@ -1,15 +1,14 @@
 [Unit]
-After=network-online.target
-Wants=network-online.target
+After=nftables.service
+Wants=nftables.service
+
+[Install]
+WantedBy=multi-user.target
 
 [Service]
-Type=forking
-Restart=no
-TimeoutSec=30sec
-IgnoreSIGPIPE=no
-KillMode=none
-GuessMainPID=no
-RemainAfterExit=no
+Type=oneshot
+RemainAfterExit=yes
+
 ExecStart=/usr/share/mss-nfqws/nfqws-handler start
 ExecStop=/usr/share/mss-nfqws/nfqws-handler stop
 

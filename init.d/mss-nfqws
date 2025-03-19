@@ -1,15 +1,12 @@
 #!/bin/sh /etc/rc.common
-# cd /bin/; wget https://github.com/bol-van/zapret/raw/master/binaries/mips32r1-lsb/nfqws
-# opkg install kmod-nft-queue
-# cd /etc/init.d; ./zapret enable; ./zapret start
 
 START=21
 STOP=89
 
 iface="$(grep 00000000 /proc/net/route | awk 'NR==1 {print $1}')"
-#iface="pppoe-wan"
 
 start(){
+    nft delete table inet mss-nfqws || true
     nft add table inet mss-nfqws
 
     nft 'create chain inet mss-nfqws nfq {\
@@ -23,25 +20,24 @@ start(){
         mark and 0x40000000 != 0x40000000       \
         queue num 200 bypass
 
-    nfqws \
-        --uid=0:0                      \
-        --qnum=200                     \
-        --dpi-desync-fwmark=0x40000000 \
-        --wssize=1:6                   \
-        --hostcase                     \
-        --hostspell=hoST               \
-        --hostnospace                  \
-        --domcase                      \
-        --dpi-desync=fake              \
-        --dpi-desync-fooling=md5sig    \
-        --dpi-desync-retrans=1         \
-        --dpi-desync-skip-nosni=0      \
-        --dpi-desync-ttl=6             \
-        --daemon
+   nfqws \
+       --daemon \
+       --uid=0:0 \
+       --qnum=200 \
+       --dpi-desync-fwmark=0x40000000 \
+       --wssize=1:6 \
+       --hostcase \
+       --hostspell=hoST \
+       --hostnospace \
+       --domcase \
+       --dpi-desync=fake \
+       --dpi-desync-fooling=md5sig \
+       --dpi-desync-skip-nosni=0 \
+       --dpi-desync-ttl=6
 }
 
 stop(){
-    nft delete table inet mss-nfqws
+    nft delete table inet mss-nfqws || true
 
     for i in `pidof nfqws`; do
         kill -KILL "${i}"

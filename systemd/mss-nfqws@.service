@@ -1,0 +1,34 @@
+[Unit]
+Description=nfqws for %i
+After=nftables.service
+Requires=nftables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+ExecStartPre=-/usr/sbin/nft delete table ip mss-nfqws
+
+ExecStart=nft add table ip mss-nfqws
+ExecStart=nft create chain ip mss-nfqws nfq {type filter hook postrouting priority mangle; policy accept;}
+ExecStart=nft add rule ip mss-nfqws nfq oifname %i tcp dport {80,443} ct original packets 1-4 mark and 0x40000000 != 0x40000000 queue num 200 bypass
+ExecStart=nfqws \
+    --daemon \
+    --uid=0:0 \
+    --qnum=200 \
+    --dpi-desync-fwmark=0x40000000 \
+    --wssize=1:6 \
+    --hostcase \
+    --hostspell=hoST \
+    --hostnospace \
+    --domcase \
+    --dpi-desync=fake \
+    --dpi-desync-fooling=md5sig \
+    --dpi-desync-skip-nosni=0 \
+    --dpi-desync-ttl=6
+
+ExecStop=nft delete table ip mss-nfqws
+ExecStop=pkill -f nfqws
+
+[Install]
+WantedBy=multi-user.target

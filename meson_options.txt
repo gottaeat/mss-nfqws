@@ -1,5 +1,6 @@
-option('openwrt',
-        type: 'boolean',
-        value: 'false', 
-        description: 'Whether we are building for an OpenWRT target or not.'
-        )
+option(
+    'openwrt',
+    type: 'boolean',
+    value: false,
+    description: 'Whether we are building for an OpenWRT target or not.'
+)

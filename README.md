@@ -1,11 +1,11 @@
 # mss-nfqws
-this repo contains the tool named `nfq` from the bol-van/zapret[1] tree grafted
-at commit 3558e7c8:
+mss-nfqws packages the `nfqws` binary from bol-van/zapret[1]. it has the
+following differences:
 - ported to meson instead of {GNU,BSD}Makefile
 - openwrt build recipe with a simplified init file
 - saner, simple unit file for systemd
 
-[1] nfq is licensed under MIT.
+[1] nfqws is licensed under MIT.
 
 ## building
 builds are done via docker, the sample Dockerfile provided assumes a ramips

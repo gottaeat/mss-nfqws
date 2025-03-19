@@ -1,5 +1,6 @@
 #pragma once
 
+
 // this conntrack is not bullet-proof
 // its designed to satisfy dpi desync needs only
 
@@ -9,10 +10,15 @@
 #include <sys/types.h>
 #include <time.h>
 #include <netinet/in.h>
+
+#define __FAVOR_BSD
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
+
+#include "packet_queue.h"
+#include "protocol.h"
 
 //#define HASH_BLOOM 20
 #define HASH_NONFATAL_OOM 1
@@ -46,9 +52,14 @@ typedef struct {
 // ESTABLISHED - any except SYN or SYN/ACK received
 // FIN - FIN or RST received
 typedef enum {SYN=0, ESTABLISHED, FIN} t_connstate;
-typedef enum {UNKNOWN=0, HTTP, TLS, QUIC, WIREGUARD, DHT} t_l7proto;
+
 typedef struct
 {
+	bool bCheckDone, bCheckResult, bCheckExcluded; // hostlist check result cache
+
+	struct desync_profile *dp;		// desync profile cache
+	bool dp_search_complete;
+
 	// common state
 	time_t t_start, t_last;
 	uint64_t pcounter_orig, pcounter_reply;	// packet counter
@@ -63,18 +74,21 @@ typedef struct
 	uint8_t scale_orig, scale_reply;	// last seen window scale factor. SCALE_NONE if none
 	
 	uint8_t req_retrans_counter;		// number of request retransmissions
-	bool req_seq_start_present, req_seq_present;
+	bool req_seq_present,req_seq_finalized,req_seq_abandoned;
 	uint32_t req_seq_start,req_seq_end;	// sequence interval of the request (to track retransmissions)
 
-	uint8_t autottl;
+	uint8_t incoming_ttl, autottl;
 
 	bool b_cutoff;				// mark for deletion
 	bool b_wssize_cutoff, b_desync_cutoff;
 
-	t_reassemble reasm_orig;
-
 	t_l7proto l7proto;
+	bool l7proto_discovered;
 	char *hostname;
+	bool hostname_ah_check;			// should perform autohostlist checks
+	
+	t_reassemble reasm_orig;
+	struct rawpacket_tailhead delayed;
 } t_ctrack;
 
 typedef struct
@@ -94,6 +108,8 @@ typedef struct
 void ConntrackPoolInit(t_conntrack *p, time_t purge_interval, uint32_t timeout_syn, uint32_t timeout_established, uint32_t timeout_fin, uint32_t timeout_udp);
 void ConntrackPoolDestroy(t_conntrack *p);
 bool ConntrackPoolFeed(t_conntrack *p, const struct ip *ip, const struct ip6_hdr *ip6, const struct tcphdr *tcphdr, const struct udphdr *udphdr, size_t len_payload, t_ctrack **ctrack, bool *bReverse);
+// do not create, do not update. only find existing
+bool ConntrackPoolDoubleSearch(t_conntrack *p, const struct ip *ip, const struct ip6_hdr *ip6, const struct tcphdr *tcphdr, const struct udphdr *udphdr, t_ctrack **ctrack, bool *bReverse);
 bool ConntrackPoolDrop(t_conntrack *p, const struct ip *ip, const struct ip6_hdr *ip6, const struct tcphdr *tcphdr, const struct udphdr *udphdr);
 void CaonntrackExtractConn(t_conn *c, bool bReverse, const struct ip *ip, const struct ip6_hdr *ip6, const struct tcphdr *tcphdr, const struct udphdr *udphdr);
 void ConntrackPoolDump(const t_conntrack *p);
@@ -101,8 +117,11 @@ void ConntrackPoolPurge(t_conntrack *p);
 void ConntrackClearHostname(t_ctrack *track);
 
 bool ReasmInit(t_reassemble *reasm, size_t size_requested, uint32_t seq_start);
+bool ReasmResize(t_reassemble *reasm, size_t new_size);
 void ReasmClear(t_reassemble *reasm);
 // false means reassemble session has failed and we should ReasmClear() it
 bool ReasmFeed(t_reassemble *reasm, uint32_t seq, const void *payload, size_t len);
+// check if it has enough space to buffer 'len' bytes
+bool ReasmHasSpace(t_reassemble *reasm, size_t len);
 inline static bool ReasmIsEmpty(t_reassemble *reasm) {return !reasm->size;}
 inline static bool ReasmIsFull(t_reassemble *reasm) {return !ReasmIsEmpty(reasm) && (reasm->size==reasm->size_present);}

@@ -1,10 +1,11 @@
 #pragma once
 
 #include "darkmagic.h"
-#include "nfqws.h"
 
 #include <stdint.h>
 #include <stdbool.h>
+
+#define __FAVOR_BSD
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <netinet/tcp.h>
@@ -27,10 +28,10 @@ enum dpi_desync_mode {
 	DESYNC_RSTACK,
 	DESYNC_SYNACK,
 	DESYNC_SYNDATA,
-	DESYNC_DISORDER,
-	DESYNC_DISORDER2,
-	DESYNC_SPLIT,
-	DESYNC_SPLIT2,
+	DESYNC_FAKEDSPLIT,
+	DESYNC_FAKEDDISORDER,
+	DESYNC_MULTISPLIT,
+	DESYNC_MULTIDISORDER,
 	DESYNC_IPFRAG2,
 	DESYNC_HOPBYHOP,
 	DESYNC_DESTOPT,
@@ -40,7 +41,8 @@ enum dpi_desync_mode {
 };
 
 extern const char *fake_http_request_default;
-extern const uint8_t fake_tls_clienthello_default[517];
+extern const uint8_t fake_tls_clienthello_default[648];
+void randomize_default_tls_payload(uint8_t *p);
 
 enum dpi_desync_mode desync_mode_from_string(const char *s);
 bool desync_valid_zero_stage(enum dpi_desync_mode mode);
@@ -50,6 +52,4 @@ bool desync_valid_second_stage(enum dpi_desync_mode mode);
 bool desync_valid_second_stage_tcp(enum dpi_desync_mode mode);
 bool desync_valid_second_stage_udp(enum dpi_desync_mode mode);
 
-void desync_init(void);
-packet_process_result dpi_desync_tcp_packet(uint32_t fwmark, const char *ifout, uint8_t *data_pkt, size_t len_pkt, struct ip *ip, struct ip6_hdr *ip6hdr, struct tcphdr *tcphdr, size_t len_tcp, uint8_t *data_payload, size_t len_payload);
-packet_process_result dpi_desync_udp_packet(uint32_t fwmark, const char *ifout, uint8_t *data_pkt, size_t len_pkt, struct ip *ip, struct ip6_hdr *ip6hdr, struct udphdr *udphdr, uint8_t *data_payload, size_t len_payload);
+uint8_t dpi_desync_packet(uint32_t fwmark, const char *ifout, uint8_t *data_pkt, size_t *len_pkt);

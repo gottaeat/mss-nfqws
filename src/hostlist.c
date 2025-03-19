@@ -1,21 +1,36 @@
 #include <stdio.h>
 #include "hostlist.h"
 #include "gzip.h"
-#include "params.h"
-
+#include "helpers.h"
 
 // inplace tolower() and add to pool
-static bool addpool(strpool **hostlist, char **s, const char *end)
+static bool addpool(hostlist_pool **hostlist, char **s, const char *end, int *ct)
 {
-	char *p;
-	
-	// advance until eol lowering all chars
-	for (p = *s; p<end && *p && *p!='\r' && *p != '\n'; p++) *p=tolower(*p);
-	if (!StrPoolAddStrLen(hostlist, *s, p-*s))
+	char *p=*s;
+
+	// comment line
+	if ( *p == '#' || *p == ';' || *p == '/' || *p == '\r' || *p == '\n')
 	{
-		StrPoolDestroy(hostlist);
-		*hostlist = NULL;
-		return false;
+		// advance until eol
+		for (; p<end && *p && *p!='\r' && *p != '\n'; p++);
+	}
+	else
+	{
+		// advance until eol lowering all chars
+		uint32_t flags = 0;
+		if (*p=='^')
+		{
+			p = ++(*s);
+			flags |= HOSTLIST_POOL_FLAG_STRICT_MATCH;
+		}
+		for (; p<end && *p && *p!='\r' && *p != '\n'; p++) *p=tolower(*p);
+		if (!HostlistPoolAddStrLen(hostlist, *s, p-*s, flags))
+		{
+			HostlistPoolDestroy(hostlist);
+			*hostlist = NULL;
+			return false;
+		}
+		if (ct) (*ct)++;
 	}
 	// advance to the next line
 	for (; p<end && (!*p || *p=='\r' || *p=='\n') ; p++);
@@ -23,7 +38,12 @@ static bool addpool(strpool **hostlist, char **s, const char *end)
 	return true;
 }
 
-bool AppendHostList(strpool **hostlist, char *filename)
+bool AppendHostlistItem(hostlist_pool **hostlist, char *s)
+{
+	return addpool(hostlist,&s,s+strlen(s),NULL);
+}
+
+bool AppendHostList(hostlist_pool **hostlist, const char *filename)
 {
 	char *p, *e, s[256], *zbuf;
 	size_t zsize;
@@ -31,11 +51,11 @@ bool AppendHostList(strpool **hostlist, char *filename)
 	FILE *F;
 	int r;
 
-	printf("Loading hostlist %s\n",filename);
+	DLOG_CONDUP("Loading hostlist %s\n",filename);
 
 	if (!(F = fopen(filename, "rb")))
 	{
-		fprintf(stderr, "Could not open %s\n", filename);
+		DLOG_ERR("Could not open %s\n", filename);
 		return false;
 	}
 
@@ -45,109 +65,273 @@ bool AppendHostList(strpool **hostlist, char *filename)
 		fclose(F);
 		if (r==Z_OK)
 		{
-			printf("zlib compression detected. uncompressed size : %zu\n", zsize);
-			
+			DLOG_CONDUP("zlib compression detected. uncompressed size : %zu\n", zsize);
+
 			p = zbuf;
 			e = zbuf + zsize;
 			while(p<e)
 			{
-				if (!addpool(hostlist,&p,e))
+				if (!addpool(hostlist,&p,e,&ct))
 				{
-					fprintf(stderr, "Not enough memory to store host list : %s\n", filename);
+					DLOG_ERR("Not enough memory to store host list : %s\n", filename);
 					free(zbuf);
 					return false;
 				}
-				ct++;
 			}
 			free(zbuf);
 		}
 		else
 		{
-			fprintf(stderr, "zlib decompression failed : result %d\n",r);
+			DLOG_ERR("zlib decompression failed : result %d\n",r);
 			return false;
 		}
 	}
 	else
 	{
-		printf("loading plain text list\n");
-		
-		while (fgets(s, 256, F))
+		DLOG_CONDUP("loading plain text list\n");
+
+		while (fgets(s, sizeof(s), F))
 		{
 			p = s;
-			if (!addpool(hostlist,&p,p+strlen(p)))
+			if (!addpool(hostlist,&p,p+strlen(p),&ct))
 			{
-				fprintf(stderr, "Not enough memory to store host list : %s\n", filename);
+				DLOG_ERR("Not enough memory to store host list : %s\n", filename);
 				fclose(F);
 				return false;
 			}
-			ct++;
 		}
 		fclose(F);
 	}
 
-	printf("Loaded %d hosts from %s\n", ct, filename);
+	DLOG_CONDUP("Loaded %d hosts from %s\n", ct, filename);
 	return true;
 }
 
-bool LoadHostLists(strpool **hostlist, struct str_list_head *file_list)
+static bool LoadHostList(struct hostlist_file *hfile)
 {
-	struct str_list *file;
-
-	if (*hostlist)
+	if (hfile->filename)
 	{
-		StrPoolDestroy(hostlist);
-		*hostlist = NULL;
-	}
-
-	LIST_FOREACH(file, file_list, next)
-	{
-		if (!AppendHostList(hostlist, file->str)) return false;
+		file_mod_sig fsig;
+		if (!file_mod_signature(hfile->filename, &fsig))
+		{
+			// stat() error
+			DLOG_PERROR("file_mod_signature");
+			DLOG_ERR("cannot access hostlist file '%s'. in-memory content remains unchanged.\n",hfile->filename);
+			return true;
+		}
+		if (FILE_MOD_COMPARE(&hfile->mod_sig,&fsig)) return true; // up to date
+		HostlistPoolDestroy(&hfile->hostlist);
+		if (!AppendHostList(&hfile->hostlist, hfile->filename))
+		{
+			HostlistPoolDestroy(&hfile->hostlist);
+			return false;
+		}
+		hfile->mod_sig=fsig;
 	}
 	return true;
 }
+static bool LoadHostLists(struct hostlist_files_head *list)
+{
+	bool bres=true;
+	struct hostlist_file *hfile;
 
-bool NonEmptyHostlist(strpool **hostlist)
+	LIST_FOREACH(hfile, list, next)
+	{
+		if (!LoadHostList(hfile))
+			// at least one failed
+			bres=false;
+	}
+	return bres;
+}
+
+bool NonEmptyHostlist(hostlist_pool **hostlist)
 {
 	// add impossible hostname if the list is empty
-	return *hostlist ? true : StrPoolAddStrLen(hostlist, "@&()", 4);
+	return *hostlist ? true : HostlistPoolAddStrLen(hostlist, "@&()", 4, 0);
+}
+
+static void MakeAutolistsNonEmpty()
+{
+	struct desync_profile_list *dpl;
+	LIST_FOREACH(dpl, &params.desync_profiles, next)
+	{
+		if (dpl->dp.hostlist_auto)
+			NonEmptyHostlist(&dpl->dp.hostlist_auto->hostlist);
+	}
+}
+
+bool LoadAllHostLists()
+{
+	if (!LoadHostLists(&params.hostlists))
+		return false;
+	MakeAutolistsNonEmpty();
+	return true;
 }
 
 
-bool SearchHostList(strpool *hostlist, const char *host)
+
+static bool SearchHostList(hostlist_pool *hostlist, const char *host)
 {
 	if (hostlist)
 	{
 		const char *p = host;
-		bool bInHostList;
+		const struct hostlist_pool *hp;
+		bool bHostFull=true;
 		while (p)
 		{
-			bInHostList = StrPoolCheckStr(hostlist, p);
-			if (params.debug) printf("Hostlist check for %s : %s\n", p, bInHostList ? "positive" : "negative");
-			if (bInHostList) return true;
+			DLOG("hostlist check for %s : ", p);
+			hp = HostlistPoolGetStr(hostlist, p);
+			if (hp)
+			{
+				if ((hp->flags & HOSTLIST_POOL_FLAG_STRICT_MATCH) && !bHostFull)
+				{
+					DLOG("negative : strict_mismatch : %s != %s\n", p, host);
+				}
+				else
+				{
+					DLOG("positive\n");
+					return true;
+				}
+			}
+			else
+				DLOG("negative\n");
 			p = strchr(p, '.');
 			if (p) p++;
+			bHostFull = false;
 		}
 	}
 	return false;
 }
 
-// return : true = apply fooling, false = do not apply
-bool HostlistCheck(strpool *hostlist, strpool *hostlist_exclude, const char *host, bool *excluded)
+
+static bool HostlistsReloadCheck(const struct hostlist_collection_head *hostlists)
 {
-	if (excluded) *excluded = false;
-	if (hostlist_exclude)
+	struct hostlist_item *item;
+	LIST_FOREACH(item, hostlists, next)
 	{
-		if (params.debug) printf("Checking exclude hostlist\n");
-		if (SearchHostList(hostlist_exclude, host))
+		if (!LoadHostList(item->hfile))
+			return false;
+	}
+	MakeAutolistsNonEmpty();
+	return true;
+}
+bool HostlistsReloadCheckForProfile(const struct desync_profile *dp)
+{
+	return HostlistsReloadCheck(&dp->hl_collection) && HostlistsReloadCheck(&dp->hl_collection_exclude);
+}
+// return : true = apply fooling, false = do not apply
+static bool HostlistCheck_(const struct hostlist_collection_head *hostlists, const struct hostlist_collection_head *hostlists_exclude, const char *host, bool *excluded, bool bSkipReloadCheck)
+{
+	struct hostlist_item *item;
+
+	if (excluded) *excluded = false;
+
+	if (!bSkipReloadCheck)
+		if (!HostlistsReloadCheck(hostlists) || !HostlistsReloadCheck(hostlists_exclude))
+			return false;
+
+	LIST_FOREACH(item, hostlists_exclude, next)
+	{
+		DLOG("[%s] exclude ", item->hfile->filename ? item->hfile->filename : "fixed");
+		if (SearchHostList(item->hfile->hostlist, host))
 		{
 			if (excluded) *excluded = true;
 			return false;
 		}
 	}
-	if (hostlist)
+	// old behavior compat: all include lists are empty means check passes
+	if (!hostlist_collection_is_empty(hostlists))
 	{
-		if (params.debug) printf("Checking include hostlist\n");
-		return SearchHostList(hostlist, host);
+		LIST_FOREACH(item, hostlists, next)
+		{
+			DLOG("[%s] include ", item->hfile->filename ? item->hfile->filename : "fixed");
+			if (SearchHostList(item->hfile->hostlist, host))
+				return true;
+		}
+		return false;
 	}
 	return true;
+}
+
+
+// return : true = apply fooling, false = do not apply
+bool HostlistCheck(const struct desync_profile *dp, const char *host, bool *excluded, bool bSkipReloadCheck)
+{
+	DLOG("* hostlist check for profile %d\n",dp->n);
+	return HostlistCheck_(&dp->hl_collection, &dp->hl_collection_exclude, host, excluded, bSkipReloadCheck);
+}
+
+
+static struct hostlist_file *RegisterHostlist_(struct hostlist_files_head *hostlists, struct hostlist_collection_head *hl_collection, const char *filename)
+{
+	struct hostlist_file *hfile;
+
+	if (filename)
+	{
+		if (!(hfile=hostlist_files_search(hostlists, filename)))
+			if (!(hfile=hostlist_files_add(hostlists, filename)))
+				return NULL;
+		if (!hostlist_collection_search(hl_collection, filename))
+			if (!hostlist_collection_add(hl_collection, hfile))
+				return NULL;
+	}
+	else
+	{
+		if (!(hfile=hostlist_files_add(hostlists, NULL)))
+			return NULL;
+		if (!hostlist_collection_add(hl_collection, hfile))
+			return NULL;
+	}
+
+	return hfile;
+}
+struct hostlist_file *RegisterHostlist(struct desync_profile *dp, bool bExclude, const char *filename)
+{
+	if (filename && !file_mod_time(filename))
+	{
+		DLOG_ERR("cannot access hostlist file '%s'\n",filename);
+		return NULL;
+	}
+	return RegisterHostlist_(
+		&params.hostlists,
+		bExclude ? &dp->hl_collection_exclude : &dp->hl_collection,
+		filename);
+}
+
+void HostlistsDebug()
+{
+	if (!params.debug) return;
+
+	struct hostlist_file *hfile;
+	struct desync_profile_list *dpl;
+	struct hostlist_item *hl_item;
+
+	LIST_FOREACH(hfile, &params.hostlists, next)
+	{
+		if (hfile->filename)
+			DLOG("hostlist file %s%s\n",hfile->filename,hfile->hostlist ? "" : " (empty)");
+		else
+			DLOG("hostlist fixed%s\n",hfile->hostlist ? "" : " (empty)");
+	}
+
+	LIST_FOREACH(dpl, &params.desync_profiles, next)
+	{
+		LIST_FOREACH(hl_item, &dpl->dp.hl_collection, next)
+			if (hl_item->hfile!=dpl->dp.hostlist_auto)
+			{
+				if (hl_item->hfile->filename)
+					DLOG("profile %d include hostlist %s%s\n",dpl->dp.n, hl_item->hfile->filename,hl_item->hfile->hostlist ? "" : " (empty)");
+				else
+					DLOG("profile %d include fixed hostlist%s\n",dpl->dp.n, hl_item->hfile->hostlist ? "" : " (empty)");
+			}
+		LIST_FOREACH(hl_item, &dpl->dp.hl_collection_exclude, next)
+		{
+			if (hl_item->hfile->filename)
+				DLOG("profile %d exclude hostlist %s%s\n",dpl->dp.n,hl_item->hfile->filename,hl_item->hfile->hostlist ? "" : " (empty)");
+			else
+				DLOG("profile %d exclude fixed hostlist%s\n",dpl->dp.n,hl_item->hfile->hostlist ? "" : " (empty)");
+		}
+		if (dpl->dp.hostlist_auto)
+			DLOG("profile %d auto hostlist %s%s\n",dpl->dp.n,dpl->dp.hostlist_auto->filename,dpl->dp.hostlist_auto->hostlist ? "" : " (empty)");
+	}
 }

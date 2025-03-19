@@ -2,13 +2,159 @@
 
 #include "protocol.h"
 #include "helpers.h"
+#include "params.h"
+
 #include <string.h>
 #include <ctype.h>
 #include <arpa/inet.h>
 #include <string.h>
 
-const char *http_methods[] = { "GET /","POST /","HEAD /","OPTIONS /","PUT /","DELETE /","CONNECT /","TRACE /",NULL };
-bool IsHttp(const uint8_t *data, size_t len)
+// find N level domain
+static bool FindNLD(const uint8_t *dom, size_t dlen, int level, const uint8_t **p, size_t *len)
+{
+	int i;
+	const uint8_t *p1,*p2;
+	for (i=1,p2=dom+dlen;i<level;i++)
+	{
+		for (p2--; p2>dom && *p2!='.'; p2--);
+		if (p2<=dom) return false;
+	}
+	for (p1=p2-1 ; p1>dom && *p1!='.'; p1--);
+	if (*p1=='.') p1++;
+	if (p) *p = p1;
+	if (len) *len = p2-p1;
+	return true;
+}
+
+const char *l7proto_str(t_l7proto l7)
+{
+	switch(l7)
+	{
+		case HTTP: return "http";
+		case TLS: return "tls";
+		case QUIC: return "quic";
+		case WIREGUARD: return "wireguard";
+		case DHT: return "dht";
+		default: return "unknown";
+	}
+}
+bool l7_proto_match(t_l7proto l7proto, uint32_t filter_l7)
+{
+	return  (l7proto==UNKNOWN && (filter_l7 & L7_PROTO_UNKNOWN)) ||
+		(l7proto==HTTP && (filter_l7 & L7_PROTO_HTTP)) ||
+		(l7proto==TLS && (filter_l7 & L7_PROTO_TLS)) ||
+		(l7proto==QUIC && (filter_l7 & L7_PROTO_QUIC)) ||
+		(l7proto==WIREGUARD && (filter_l7 & L7_PROTO_WIREGUARD)) ||
+		(l7proto==DHT && (filter_l7 & L7_PROTO_DHT));
+}
+
+#define PM_ABS		0
+#define PM_HOST		1
+#define PM_HOST_END	2
+#define PM_HOST_SLD	3
+#define PM_HOST_MIDSLD	4
+#define PM_HOST_ENDSLD	5
+#define PM_HTTP_METHOD	6
+#define PM_SNI_EXT	7
+bool IsHostMarker(uint8_t posmarker)
+{
+	switch(posmarker)
+	{
+		case PM_HOST:
+		case PM_HOST_END:
+		case PM_HOST_SLD:
+		case PM_HOST_MIDSLD:
+		case PM_HOST_ENDSLD:
+			return true;
+		default:
+			return false;
+	}
+}
+const char *posmarker_name(uint8_t posmarker)
+{
+	switch(posmarker)
+	{
+		case PM_ABS: return "abs";
+		case PM_HOST: return "host";
+		case PM_HOST_END: return "endhost";
+		case PM_HOST_SLD: return "sld";
+		case PM_HOST_MIDSLD: return "midsld";
+		case PM_HOST_ENDSLD: return "endsld";
+		case PM_HTTP_METHOD: return "method";
+		case PM_SNI_EXT: return "sniext";
+		default: return "?";
+	}
+}
+
+static size_t CheckPos(size_t sz, ssize_t offset)
+{
+	return (offset>=0 && offset<sz) ? offset : 0;
+}
+size_t AnyProtoPos(uint8_t posmarker, int16_t pos, const uint8_t *data, size_t sz)
+{
+	ssize_t offset;
+	switch(posmarker)
+	{
+		case PM_ABS:
+			offset = (pos<0) ? sz+pos : pos;
+			return CheckPos(sz,offset);
+		default:
+			return 0;
+	}
+}
+static size_t HostPos(uint8_t posmarker, int16_t pos, const uint8_t *data, size_t sz, size_t offset_host, size_t len_host)
+{
+	ssize_t offset;
+	const uint8_t *p;
+	size_t slen;
+
+	switch(posmarker)
+	{
+		case PM_HOST:
+			offset = offset_host+pos;
+			break;
+		case PM_HOST_END:
+			offset = offset_host+len_host+pos;
+			break;
+		case PM_HOST_SLD:
+		case PM_HOST_MIDSLD:
+		case PM_HOST_ENDSLD:
+			if (((offset_host+len_host)<=sz) && FindNLD(data+offset_host,len_host,2,&p,&slen))
+				offset = (posmarker==PM_HOST_SLD ? p-data : posmarker==PM_HOST_ENDSLD ? p-data+slen : slen==1 ? p+1-data : p+slen/2-data) + pos;
+			else
+				offset = 0;
+			break;
+	}
+	return CheckPos(sz,offset);
+}
+size_t ResolvePos(const uint8_t *data, size_t sz, t_l7proto l7proto, const struct proto_pos *sp)
+{
+	switch(l7proto)
+	{
+		case HTTP:
+			return HttpPos(sp->marker, sp->pos, data, sz);
+		case TLS:
+			return TLSPos(sp->marker, sp->pos, data, sz);
+		default:
+			return AnyProtoPos(sp->marker, sp->pos, data, sz);
+	}
+}
+void ResolveMultiPos(const uint8_t *data, size_t sz, t_l7proto l7proto, const struct proto_pos *splits, int split_count, size_t *pos, int *pos_count)
+{
+	int i,j;
+	for(i=j=0;i<split_count;i++)
+	{
+		pos[j] = ResolvePos(data,sz,l7proto,splits+i);
+		if (pos[j]) j++;
+	}
+	qsort_size_t(pos, j);
+	j=unique_size_t(pos, j);
+	*pos_count=j;
+}
+
+
+const char *http_methods[] = { "GET /","POST /","HEAD /","OPTIONS ","PUT /","DELETE /","CONNECT ","TRACE /",NULL };
+const char *HttpMethod(const uint8_t *data, size_t len)
 {
 	const char **method;
 	size_t method_len;
@@ -16,10 +162,67 @@ bool IsHttp(const uint8_t *data, size_t len)
 	{
 		method_len = strlen(*method);
 		if (method_len <= len && !memcmp(data, *method, method_len))
-			return true;
+			return *method;
 	}
-	return false;
+	return NULL;
 }
+bool IsHttp(const uint8_t *data, size_t len)
+{
+	return !!HttpMethod(data,len);
+}
+
+static bool IsHostAt(const uint8_t *p)
+{
+	return \
+		p[0]=='\n' &&
+		(p[1]=='H' || p[1]=='h') &&
+		(p[2]=='o' || p[2]=='O') &&
+		(p[3]=='s' || p[3]=='S') &&
+		(p[4]=='t' || p[4]=='T') &&
+		p[5]==':';
+}
+static uint8_t *FindHostIn(uint8_t *buf, size_t bs)
+{
+	size_t pos;
+	if (bs<6) return NULL;
+	bs-=6;
+	for(pos=0;pos<=bs;pos++)
+		if (IsHostAt(buf+pos))
+			return buf+pos;
+
+	return NULL;
+}
+static const uint8_t *FindHostInConst(const uint8_t *buf, size_t bs)
+{
+	size_t pos;
+	if (bs<6) return NULL;
+	bs-=6;
+	for(pos=0;pos<=bs;pos++)
+		if (IsHostAt(buf+pos))
+			return buf+pos;
+
+	return NULL;
+}
+// pHost points to "Host: ..."
+bool HttpFindHost(uint8_t **pHost,uint8_t *buf,size_t bs)
+{
+	if (!*pHost)
+	{
+		*pHost = FindHostIn(buf, bs);
+		if (*pHost) (*pHost)++;
+	}
+	return !!*pHost;
+}
+bool HttpFindHostConst(const uint8_t **pHost,const uint8_t *buf,size_t bs)
+{
+	if (!*pHost)
+	{
+		*pHost = FindHostInConst(buf, bs);
+		if (*pHost) (*pHost)++;
+	}
+	return !!*pHost;
+}
+
 bool IsHttpReply(const uint8_t *data, size_t len)
 {
 	// HTTP/1.x 200\r\n
@@ -59,17 +262,6 @@ bool HttpExtractHost(const uint8_t *data, size_t len, char *host, size_t len_hos
 {
 	return HttpExtractHeader(data, len, "\nHost:", host, len_host);
 }
-const char *HttpFind2ndLevelDomain(const char *host)
-{
-	const char *p=NULL;
-	if (*host)
-	{
-		for (p = host + strlen(host)-1; p>host && *p!='.'; p--);
-		if (*p=='.') for (p--; p>host && *p!='.'; p--);
-		if (*p=='.') p++;
-	}
-	return p;
-}
 // DPI redirects are global redirects to another domain
 bool HttpReplyLooksLikeDPIRedirect(const uint8_t *data, size_t len, const char *host)
 {
@@ -80,7 +272,7 @@ bool HttpReplyLooksLikeDPIRedirect(const uint8_t *data, size_t len, const char *
 	
 	code = HttpReplyCode(data,len);
 	
-	if (code!=302 && code!=307 || !HttpExtractHeader(data,len,"\nLocation:",loc,sizeof(loc))) return false;
+	if ((code!=302 && code!=307) || !HttpExtractHeader(data,len,"\nLocation:",loc,sizeof(loc))) return false;
 
 	// something like : https://censor.net/badpage.php?reason=denied&source=RKN
 		
@@ -100,12 +292,54 @@ bool HttpReplyLooksLikeDPIRedirect(const uint8_t *data, size_t len, const char *
 	// somethinkg like : censor.net
 	
 	// extract 2nd level domains
+	const char *dhost, *drhost;
+	if (!FindNLD((uint8_t*)host,strlen(host),2,(const uint8_t**)&dhost,NULL) || !FindNLD((uint8_t*)redirect_host,strlen(redirect_host),2,(const uint8_t**)&drhost,NULL))
+		return false;
 
-	const char *dhost = HttpFind2ndLevelDomain(host);
-	const char *drhost = HttpFind2ndLevelDomain(redirect_host);
-	
+	// compare 2nd level domains		
 	return strcasecmp(dhost, drhost)!=0;
 }
+size_t HttpPos(uint8_t posmarker, int16_t pos, const uint8_t *data, size_t sz)
+{
+	const uint8_t *method, *host=NULL, *p;
+	size_t offset_host,len_host;
+	ssize_t offset;
+	int i;
+	
+	switch(posmarker)
+	{
+		case PM_HTTP_METHOD:
+			// recognize some tpws pre-applied hacks
+			method=data;
+			if (sz<10) break;
+			if (*method=='\n' || *method=='\r') method++;
+			if (*method=='\n' || *method=='\r') method++;
+			for (p=method,i=0;i<7;i++) if (*p>='A' && *p<='Z') p++;
+			if (i<3 || *p!=' ') break;
+			return CheckPos(sz,method-data+pos);
+		case PM_HOST:
+		case PM_HOST_END:
+		case PM_HOST_SLD:
+		case PM_HOST_MIDSLD:
+		case PM_HOST_ENDSLD:
+			if (HttpFindHostConst(&host,data,sz) && (host-data+7)<sz)
+			{
+				host+=5;
+				if (*host==' ' || *host=='\t') host++;
+				offset_host = host-data;
+				if (posmarker!=PM_HOST)
+					for (len_host=0; (offset_host+len_host)<sz && data[offset_host+len_host]!='\r' && data[offset_host+len_host]!='\n'; len_host++);
+				else
+					len_host = 0;
+				return HostPos(posmarker,pos,data,sz,offset_host,len_host);
+			}
+			break;
+		default:
+			return AnyProtoPos(posmarker,pos,data,sz);
+	}
+	return 0;
+}
+
 
 
 uint16_t TLSRecordDataLen(const uint8_t *data)
@@ -122,7 +356,61 @@ bool IsTLSRecordFull(const uint8_t *data, size_t len)
 }
 bool IsTLSClientHello(const uint8_t *data, size_t len, bool bPartialIsOK)
 {
-	return len >= 6 && data[0] == 0x16 && data[1] == 0x03 && data[2] >= 0x01 && data[2] <= 0x03 && data[5] == 0x01 && (bPartialIsOK || TLSRecordLen(data) <= len);
+	return len >= 6 && data[0] == 0x16 && data[1] == 0x03 && data[2] <= 0x03 && data[5] == 0x01 && (bPartialIsOK || TLSRecordLen(data) <= len);
+}
+
+size_t TLSHandshakeLen(const uint8_t *data)
+{
+	return data[1] << 16 | data[2] << 8 | data[3]; // HandshakeProtocol length
+}
+bool IsTLSHandshakeClientHello(const uint8_t *data, size_t len)
+{
+	return len>=4 && data[0]==0x01 && TLSHandshakeLen(data)>0;
+}
+bool IsTLSHandshakeFull(const uint8_t *data, size_t len)
+{
+	return (4+TLSHandshakeLen(data))<=len;
+}
+
+
+bool TLSFindExtLenOffsetInHandshake(const uint8_t *data, size_t len, size_t *off)
+{
+	// +0
+	// u8	HandshakeType: ClientHello
+	// u24	Length
+	// u16	Version
+	// c[32] random
+	// u8	SessionIDLength
+	//	<SessionID>
+	// u16	CipherSuitesLength
+	//	<CipherSuites>
+	// u8	CompressionMethodsLength
+	//	<CompressionMethods>
+	// u16	ExtensionsLength
+
+	size_t l;
+
+	l = 1 + 3 + 2 + 32;
+	// SessionIDLength
+	if (len < (l + 1)) return false;
+	l += data[l] + 1;
+	// CipherSuitesLength
+	if (len < (l + 2)) return false;
+	l += pntoh16(data + l) + 2;
+	// CompressionMethodsLength
+	if (len < (l + 1)) return false;
+	l += data[l] + 1;
+	// ExtensionsLength
+	if (len < (l + 2)) return false;
+	*off = l;
+	return true;
+}
+bool TLSFindExtLen(const uint8_t *data, size_t len, size_t *off)
+{
+	if (!TLSFindExtLenOffsetInHandshake(data+5,len-5,off))
+		return false;
+	*off+=5;
+	return true;
 }
 
 // bPartialIsOK=true - accept partial packets not containing the whole TLS message
@@ -141,25 +429,11 @@ bool TLSFindExtInHandshake(const uint8_t *data, size_t len, uint16_t type, const
 	//	<CompressionMethods>
 	// u16	ExtensionsLength
 
-	size_t l, ll;
+	size_t l;
 
-	l = 1 + 3 + 2 + 32;
-	// SessionIDLength
-	if (len < (l + 1)) return false;
-	if (!bPartialIsOK)
-	{
-	    ll = data[1] << 16 | data[2] << 8 | data[3]; // HandshakeProtocol length
-	    if (len < (ll + 4)) return false;
-	}
-	l += data[l] + 1;
-	// CipherSuitesLength
-	if (len < (l + 2)) return false;
-	l += pntoh16(data + l) + 2;
-	// CompressionMethodsLength
-	if (len < (l + 1)) return false;
-	l += data[l] + 1;
-	// ExtensionsLength
-	if (len < (l + 2)) return false;
+	if (!bPartialIsOK && !IsTLSHandshakeFull(data,len)) return false;
+
+	if (!TLSFindExtLenOffsetInHandshake(data,len,&l)) return false;
 
 	data += l; len -= l;
 	l = pntoh16(data);
@@ -206,16 +480,25 @@ bool TLSFindExt(const uint8_t *data, size_t len, uint16_t type, const uint8_t **
 	if (reclen<len) len=reclen; // correct len if it has more data than the first tls record has
 	return TLSFindExtInHandshake(data + 5, len - 5, type, ext, len_ext, bPartialIsOK);
 }
+bool TLSAdvanceToHostInSNI(const uint8_t **ext, size_t *elen, size_t *slen)
+{
+	// u16	data+0 - name list length
+	// u8	data+2 - server name type. 0=host_name
+	// u16	data+3 - server name length
+	if (*elen < 5 || (*ext)[2] != 0) return false;
+	*slen = pntoh16(*ext + 3);
+	*ext += 5; *elen -= 5;
+	return *slen <= *elen;
+}
 static bool TLSExtractHostFromExt(const uint8_t *ext, size_t elen, char *host, size_t len_host)
 {
 	// u16	data+0 - name list length
 	// u8	data+2 - server name type. 0=host_name
 	// u16	data+3 - server name length
-	if (elen < 5 || ext[2] != 0) return false;
-	size_t slen = pntoh16(ext + 3);
-	ext += 5; elen -= 5;
-	if (slen < elen) return false;
-	if (ext && len_host)
+	size_t slen;
+	if (!TLSAdvanceToHostInSNI(&ext,&elen,&slen))
+		return false;
+	if (host && len_host)
 	{
 		if (slen >= len_host) slen = len_host - 1;
 		for (size_t i = 0; i < slen; i++) host[i] = tolower(ext[i]);
@@ -240,6 +523,41 @@ bool TLSHelloExtractHostFromHandshake(const uint8_t *data, size_t len, char *hos
 	return TLSExtractHostFromExt(ext, elen, host, len_host);
 }
 
+size_t TLSPos(uint8_t posmarker, int16_t pos, const uint8_t *data, size_t sz)
+{
+	size_t elen;
+	const uint8_t *ext, *p;
+	size_t offset_host,len_host;
+	ssize_t offset;
+
+	switch(posmarker)
+	{
+		case PM_HOST:
+		case PM_HOST_END:
+		case PM_HOST_SLD:
+		case PM_HOST_MIDSLD:
+		case PM_HOST_ENDSLD:
+		case PM_SNI_EXT:
+			if (TLSFindExt(data,sz,0,&ext,&elen,TLS_PARTIALS_ENABLE))
+			{
+				if (posmarker==PM_SNI_EXT)
+				{
+					return CheckPos(sz,ext-data+pos);
+				}
+				else
+				{
+					if (!TLSAdvanceToHostInSNI(&ext,&elen,&len_host))
+						return 0;
+					offset_host = ext-data;
+					return HostPos(posmarker,pos,data,sz,offset_host,len_host);
+				}
+			}
+			return 0;
+		default:
+			return AnyProtoPos(posmarker,pos,data,sz);
+	}
+}
+
 
 
 static uint8_t tvb_get_varint(const uint8_t *tvb, uint64_t *value)
@@ -259,6 +577,8 @@ static uint8_t tvb_get_varint(const uint8_t *tvb, uint64_t *value)
 		if (value) *value = pntoh64(tvb) & 0x3FFFFFFFFFFFFFFF;
 		return 8;
 	}
+	// impossible case
+	if (*value) *value = 0;
 	return 0;
 }
 static uint8_t tvb_get_size(uint8_t tvb)
@@ -276,7 +596,7 @@ bool IsQUICCryptoHello(const uint8_t *data, size_t len, size_t *hello_offset, si
 	// offset must be 0 if it's a full segment, not just a chunk
 	if (coff || (offset+tvb_get_size(data[offset])) >= len) return false;
 	offset += tvb_get_varint(data + offset, &clen);
-	if (data[offset] != 0x01 || (offset + clen) > len) return false;
+	if ((offset + clen) > len || !IsTLSHandshakeClientHello(data+offset,clen)) return false;
 	if (hello_offset) *hello_offset = offset;
 	if (hello_len) *hello_len = (size_t)clen;
 	return true;
@@ -331,16 +651,9 @@ static bool is_quic_draft_max(uint32_t draft_version, uint8_t max_version)
 {
 	return draft_version && draft_version <= max_version;
 }
-static bool is_quic_version_with_v1_labels(uint32_t version)
-{
-	if (((version & 0xFFFFFF00) == 0x51303500)  /* Q05X */ ||
-		((version & 0xFFFFFF00) == 0x54303500)) /* T05X */
-		return true;
-	return is_quic_draft_max(QUICDraftVersion(version), 34);
-}
 static bool is_quic_v2(uint32_t version)
 {
-    return version == 0x709A50C4;
+    return version == 0x6b3343cf;
 }
 
 static bool quic_hkdf_expand_label(const uint8_t *secret, uint8_t secret_len, const char *label, uint8_t *out, size_t out_len)
@@ -402,9 +715,9 @@ static bool quic_derive_initial_secret(const quic_cid_t *cid, uint8_t *client_in
 		0x7a, 0x4e, 0xde, 0xf4, 0xe7, 0xcc, 0xee, 0x5f, 0xa4, 0x50,
 		0x6c, 0x19, 0x12, 0x4f, 0xc8, 0xcc, 0xda, 0x6e, 0x03, 0x3d
 	};
-	static const uint8_t handshake_salt_v2_draft_00[20] = {
-		0xa7, 0x07, 0xc2, 0x03, 0xa5, 0x9b, 0x47, 0x18, 0x4a, 0x1d,
-		0x62, 0xca, 0x57, 0x04, 0x06, 0xea, 0x7a, 0xe3, 0xe5, 0xd3
+	static const uint8_t handshake_salt_v2[20] = {
+		0x0d, 0xed, 0xe3, 0xde, 0xf7, 0x00, 0xa6, 0xdb, 0x81, 0x93,
+		0x81, 0xbe, 0x6e, 0x26, 0x9d, 0xcb, 0xf9, 0xbd, 0x2e, 0xd9
 	};
 
 	int err;
@@ -434,7 +747,7 @@ static bool quic_derive_initial_secret(const quic_cid_t *cid, uint8_t *client_in
 		salt = handshake_salt_v1;
 	}
 	else {
-		salt = handshake_salt_v2_draft_00;
+		salt = handshake_salt_v2;
 	}
 
 	err = hkdfExtract(SHA256, salt, 20, cid->cid, cid->len, secret);
@@ -473,7 +786,7 @@ bool QUICDecryptInitial(const uint8_t *data, size_t data_len, uint8_t *clean, si
 	if (!quic_derive_initial_secret(&dcid, client_initial_secret, ver)) return false;
 
 	uint8_t aeskey[16], aesiv[12], aeshp[16];
-	bool v1_label = is_quic_version_with_v1_labels(ver);
+	bool v1_label = !is_quic_v2(ver);
 	if (!quic_hkdf_expand_label(client_initial_secret, SHA256HashSize, v1_label ? "tls13 quic key" : "tls13 quicv2 key", aeskey, sizeof(aeskey)) ||
 		!quic_hkdf_expand_label(client_initial_secret, SHA256HashSize, v1_label ? "tls13 quic iv" : "tls13 quicv2 iv", aesiv, sizeof(aesiv)) ||
 		!quic_hkdf_expand_label(client_initial_secret, SHA256HashSize, v1_label ? "tls13 quic hp" : "tls13 quicv2 hp", aeshp, sizeof(aeshp)))
@@ -524,7 +837,7 @@ bool QUICDecryptInitial(const uint8_t *data, size_t data_len, uint8_t *clean, si
 	header[0] = packet0;
 	for(uint8_t i = 0; i < pkn_len; i++) header[header_len - 1 - i] = (uint8_t)(pkn >> (8 * i));
 
-	if (aes_gcm_crypt(DECRYPT, clean, decrypt_begin, cryptlen, aeskey, sizeof(aeskey), aesiv, sizeof(aesiv), header, header_len, atag, sizeof(atag)))
+	if (aes_gcm_crypt(AES_DECRYPT, clean, decrypt_begin, cryptlen, aeskey, sizeof(aeskey), aesiv, sizeof(aesiv), header, header_len, atag, sizeof(atag)))
 		return false;
 
 	// check if message was decrypted correctly : good keys , no data corruption
@@ -588,6 +901,7 @@ bool QUICDefragCrypto(const uint8_t *clean,size_t clean_len, uint8_t *defrag,siz
 	return found;
 }
 
+/*
 bool QUICExtractHostFromInitial(const uint8_t *data, size_t data_len, char *host, size_t len_host, bool *bDecryptOK, bool *bIsCryptoHello)
 {
 	if (bIsCryptoHello) *bIsCryptoHello=false;
@@ -607,8 +921,9 @@ bool QUICExtractHostFromInitial(const uint8_t *data, size_t data_len, char *host
 	if (!IsQUICCryptoHello(defrag, defrag_len, &hello_offset, &hello_len)) return false;
 	if (bIsCryptoHello) *bIsCryptoHello=true;
 
-	return TLSHelloExtractHostFromHandshake(defrag + hello_offset, hello_len, host, len_host, true);
+	return TLSHelloExtractHostFromHandshake(defrag + hello_offset, hello_len, host, len_host, NULL, true);
 }
+*/
 
 bool IsQUICInitial(const uint8_t *data, size_t len)
 {
@@ -652,7 +967,7 @@ bool IsQUICInitial(const uint8_t *data, size_t len)
 
 bool IsWireguardHandshakeInitiation(const uint8_t *data, size_t len)
 {
-    return len==148 && data[0]==1 && data[1]==0 && data[2]==0 && data[3]==0;
+    return len==148 && data[0]==1;
 }
 bool IsDhtD1(const uint8_t *data, size_t len)
 {

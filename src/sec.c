@@ -7,6 +7,8 @@
 #include <fcntl.h>
 #include <grp.h>
 
+#include "params.h"
+
 #ifdef __linux__
 
 #include <sys/prctl.h>
@@ -86,10 +88,6 @@ SYS_symlinkat,
 SYS_link,
 #endif
 SYS_linkat,
-#ifdef SYS_pkey_mprotect
-SYS_pkey_mprotect,
-#endif
-SYS_mprotect,
 SYS_truncate,
 #ifdef SYS_truncate64
 SYS_truncate64,
@@ -115,7 +113,9 @@ SYS_rename,
 #ifdef SYS_renameat2
 SYS_renameat2,
 #endif
+#ifdef SYS_renameat
 SYS_renameat,
+#endif
 #ifdef SYS_readdir
 SYS_readdir,
 #endif
@@ -194,14 +194,14 @@ bool sec_harden(void)
 {
 	if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0))
 	{
-		perror("PR_SET_NO_NEW_PRIVS(prctl)");
+		DLOG_PERROR("PR_SET_NO_NEW_PRIVS(prctl)");
 		return false;
 	}
 #if ARCH_NR!=0
 	if (!set_seccomp())
 	{
-		perror("seccomp");
-		if (errno==EINVAL) fprintf(stderr,"seccomp: this can be safely ignored if kernel does not support seccomp\n");
+		DLOG_PERROR("seccomp");
+		if (errno==EINVAL) DLOG_ERR("seccomp: this can be safely ignored if kernel does not support seccomp\n");
 		return false;
 	}
 #endif
@@ -257,36 +257,37 @@ bool dropcaps(void)
 		{
 			if (prctl(PR_CAPBSET_DROP, cap)<0)
 			{
-				fprintf(stderr, "could not drop bound cap %d\n", cap);
-				perror("cap_drop_bound");
+				DLOG_ERR("could not drop bound cap %d\n", cap);
+				DLOG_PERROR("cap_drop_bound");
 			}
 		}
 	}
 	// now without CAP_SETPCAP
 	if (!setpcap(caps))
 	{
-		perror("setpcap");
+		DLOG_PERROR("setpcap");
 		return checkpcap(caps);
 	}
-	return true;
-}
-#else // __linux__
-
-bool sec_harden(void)
-{
-	// noop
 	return true;
 }
 
 #endif // __linux__
 
+#ifndef __CYGWIN__
 
+#ifndef __linux__
+bool sec_harden(void)
+{
+	// noop
+	return true;
+}
+#endif
 
 bool can_drop_root(void)
 {
 #ifdef __linux__
 	// has some caps
-	return checkpcap((1<<CAP_SETUID)|(1<<CAP_SETGID)|(1<<CAP_SETPCAP));
+	return checkpcap((1<<CAP_SETUID)|(1<<CAP_SETGID));
 #else
 	// effective root
 	return !geteuid();
@@ -298,48 +299,48 @@ bool droproot(uid_t uid, gid_t gid)
 #ifdef __linux__
 	if (prctl(PR_SET_KEEPCAPS, 1L))
 	{
-		perror("prctl(PR_SET_KEEPCAPS)");
+		DLOG_PERROR("prctl(PR_SET_KEEPCAPS)");
 		return false;
 	}
 #endif
 	// drop all SGIDs
 	if (setgroups(0,NULL))
 	{
-		perror("setgroups");
+		DLOG_PERROR("setgroups");
 		return false;
 	}
 	if (setgid(gid))
 	{
-		perror("setgid");
+		DLOG_PERROR("setgid");
 		return false;
 	}
 	if (setuid(uid))
 	{
-		perror("setuid");
+		DLOG_PERROR("setuid");
 		return false;
 	}
-#ifdef __linux__
-	return dropcaps();
-#else
 	return true;
-#endif
 }
 
 void print_id(void)
 {
  int i,N;
  gid_t g[128];
- printf("Running as UID=%u GID=",getuid());
+
+ DLOG_CONDUP("Running as UID=%u GID=",getuid());
  N=getgroups(sizeof(g)/sizeof(*g),g);
  if (N>0)
  {
 	for(i=0;i<N;i++)
-		printf(i==(N-1) ? "%u" : "%u,", g[i]);
-	printf("\n");
+		DLOG_CONDUP(i==(N-1) ? "%u" : "%u,", g[i]);
+	DLOG_CONDUP("\n");
  }
  else
-	printf("%u\n",getgid());
+	DLOG_CONDUP("%u\n",getgid());
 }
+
+#endif
+
 
 void daemonize(void)
 {
@@ -348,7 +349,7 @@ void daemonize(void)
 	pid = fork();
 	if (pid == -1)
 	{
-		perror("fork");
+		DLOG_PERROR("fork");
 		exit(2);
 	}
 	else if (pid != 0)

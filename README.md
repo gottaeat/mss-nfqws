@@ -8,27 +8,16 @@ following differences:
 [1] nfqws is licensed under MIT.
 
 ## building
-builds are done via docker, the sample Dockerfile provided assumes a ramips
-mt7621 target. if what you're building for differs, please alter as needed.
+builds are done via docker, the sample Dockerfile provided assumes a lantiq
+xrx200 target. if what you're building for differs, please alter as needed.
 
 ```sh
 git clone --depth=1 https://github.com/gottaeat/mss-nfqws
 cd mss-nfqws/
 
-docker build -t mss-owrt-ramips-mt7621 .
-
-docker run --rm \
-    -e MAKEFLAGS="-j$(nproc)"                     \
-    -v "${PWD}"/openwrt-feed/:/build/openwrt-feed \
-    -v "${PWD}"/bin:/build/bin                    \
-    mss-owrt-ramips-mt7621                        \
-    bash -c \
-        "echo src-link local /build/openwrt-feed >> feeds.conf.default && \
-         ./scripts/feeds update packages base local && \
-         ./scripts/feeds install mss-nfqws && \
-         make defconfig && \
-         make package/mss-nfqws/compile"
+docker compose up
 ```
+resulting package can be found at `bin/packages/$arch/local/mss-nfqws_*.ipk`.
 
 ### attn:
 if the compilation is noticably slower inside the docker environment, that most

@@ -6,7 +6,6 @@ STOP=89
 iface="$(grep 00000000 /proc/net/route | awk 'NR==1 {print $1}')"
 
 start(){
-    nft delete table inet mss-nfqws || true
     nft add table inet mss-nfqws
 
     nft 'create chain inet mss-nfqws nfq {\
@@ -37,7 +36,7 @@ start(){
 }
 
 stop(){
-    nft delete table inet mss-nfqws || true
+    nft delete table inet mss-nfqws
 
     for i in `pidof nfqws`; do
         kill -KILL "${i}"

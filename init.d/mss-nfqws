@@ -7,6 +7,8 @@ set -e
 START=99
 STOP=99
 
+_FALLBACK_IF="pppoe-wan"
+
 log_msg(){ logger -t mss-nfqws "${1}";}
 
 start(){
@@ -16,8 +18,8 @@ start(){
 
     if [ -z "${_WAN_IFACE}" ]
         then
-	    log_msg "couldn't find wan, defaulting to pppoe-wan for iface"
-            _WAN_DEV="pppoe-wan"
+	    log_msg "couldn't find wan, defaulting to ${_FALLBACK_IF} for iface"
+            _WAN_DEV="${_FALLBACK_IF}"
         else
             network_get_device _WAN_DEV "${_WAN_IFACE}"
     fi

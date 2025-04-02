@@ -5,7 +5,7 @@ PKG_RELEASE:=1
 
 PKG_SOURCE_URL:=https://github.com/gottaeat/mss-nfqws.git
 PKG_SOURCE_PROTO:=git
-PKG_SOURCE_VERSION:=ec453900a1dc6c4ffc35fea6d06844e83b2113c4
+PKG_SOURCE_VERSION:=95ebb829fcbf5fe6b3d9cdac04868e4297149eb2
 
 PKG_BUILD_DEPENDS:=libcap
 

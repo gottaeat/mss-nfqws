@@ -1,44 +1,72 @@
 #!/bin/sh /etc/rc.common
+. /lib/functions/network.sh
 
-START=21
-STOP=89
+set +o pipefail
+set -e
 
-iface="$(grep 00000000 /proc/net/route | awk 'NR==1 {print $1}')"
+START=99
+STOP=99
+
+log_msg(){ logger -t mss-nfqws "${1}";}
 
 start(){
+    log_msg "started"
+
+    network_find_wan _WAN_IFACE || true
+
+    if [ -z "${_WAN_IFACE}" ]
+        then
+	    log_msg "couldn't find wan, defaulting to pppoe-wan for iface"
+            _WAN_DEV="pppoe-wan"
+        else
+            network_get_device _WAN_DEV "${_WAN_IFACE}"
+    fi
+
+    log_msg "wan device is: $_WAN_DEV"
+
+    nft delete table inet mss-nfqws >/dev/null 2>&1 || true
     nft add table inet mss-nfqws
 
-    nft 'create chain inet mss-nfqws nfq {\
-         type filter hook postrouting priority mangle;\
-         policy accept;\
-        }'
+    nft 'create chain inet mss-nfqws nfq { \
+        type filter hook postrouting priority mangle; \
+        policy accept; \
+    }'
 
-    nft add rule inet mss-nfqws nfq \
-        oifname "${iface}" tcp dport \{80,443\} \
-        ct original packets 1-4                 \
-        mark and 0x40000000 != 0x40000000       \
-        queue num 200 bypass
+    log_msg "created table"
 
-   nfqws \
-       --daemon \
-       --uid=0:0 \
-       --qnum=200 \
-       --dpi-desync-fwmark=0x40000000 \
-       --wssize=1:6 \
-       --hostcase \
-       --hostspell=hoST \
-       --hostnospace \
-       --domcase \
-       --dpi-desync=fake \
-       --dpi-desync-fooling=md5sig \
-       --dpi-desync-skip-nosni=0 \
-       --dpi-desync-ttl=6
+    nft add rule inet mss-nfqws nfq oifname "${_WAN_DEV}" tcp dport \{80,443\} \
+        ct original packets 1-4 mark and 0x40000000 != 0x40000000 queue \
+        num 200 bypass
+
+    log_msg "created rule"
+
+    nfqws \
+        --daemon \
+        --uid=0:0 \
+        --qnum=200 \
+        --dpi-desync-fwmark=0x40000000 \
+        --wssize=1:6 \
+        --hostcase \
+        --hostspell=hoST \
+        --hostnospace \
+        --domcase \
+        --dpi-desync=fake \
+        --dpi-desync-fooling=md5sig \
+        --dpi-desync-skip-nosni=0 \
+        --dpi-desync-ttl=6
+
+    log_msg "started nfqws"
 }
 
 stop(){
-    nft delete table inet mss-nfqws
+    nft delete table inet mss-nfqws >/dev/null 2>&1 || true
 
-    for i in `pidof nfqws`; do
-        kill -KILL "${i}"
+    log_msg "deleted table"
+
+    for i in `pgrep -x nfqws`; do
+       log_msg "killing: ${i}"
+       kill -KILL "${i}"
     done
+
+    log_msg "stopped"
 }

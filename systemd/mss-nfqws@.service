@@ -28,7 +28,7 @@ ExecStart=nfqws \
     --dpi-desync-ttl=6
 
 ExecStop=nft delete table ip mss-nfqws
-ExecStop=pkill -f nfqws
+ExecStop=pkill -x nfqws
 
 [Install]
 WantedBy=multi-user.target

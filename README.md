@@ -8,21 +8,17 @@ following differences:
 [1] nfqws is licensed under MIT.
 
 ## building
-builds are done via docker, the sample Dockerfile provided assumes a lantiq
-xrx200 target. if what you're building for differs, please alter as needed.
+builds are done via docker. the docker compose file provided assumes you're
+building for a ramips mt7621 target on arm64.
 
-```sh
-git clone --depth=1 https://github.com/gottaeat/mss-nfqws
-cd mss-nfqws/
+to build your own, get the SDK for your target, put it in `./files` and update
+the platform definition and the SDK tarball name in the compose example, then do
+`docker cmopose up`.
 
-docker compose up
-```
-resulting package can be found at `bin/packages/$arch/local/mss-nfqws_*.ipk`.
+resulting package can be found at `./out` afterwards.
 
-### attn:
-if the compilation is noticably slower inside the docker environment, that most
-likely is due to the fakeroot process within the container choking up. you might
-want to add `--ulimit "nofile=1024:524288"` to your `docker run` args, or change
-the line `LimitNOFILE=infinity` to `LimitNOFILE=1024:524288` in your `docker`
-and `containerd` systemd service files. for more in-depth reading, please refer
-to: https://github.com/moby/moby/issues/38814
+__WARNING__: if the compilation is noticably slower, that could be due to the
+fakeroot process that openwrt sdk is using choking up. so keep the `ulimit`
+definition in the example docker compose file OR set `LimitNOFILE` to
+`1024:524288` in your docker and containerd systemd service files. for more info
+refer to: https://github.com/moby/moby/issues/38814

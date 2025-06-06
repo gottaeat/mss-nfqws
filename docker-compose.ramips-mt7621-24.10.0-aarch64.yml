@@ -1,0 +1,26 @@
+---
+services:
+  nfqws-build:
+    platform: linux/arm64
+    build:
+      context: .
+    volumes:
+      - ./files:/files
+      - ./out:/out
+      - ./openwrt-feed:/build/openwrt-feed
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 524288
+    command: >
+      bash -c '
+        set +e
+        export MAKEFLAGS="-j`nproc`"
+        tar xf /files/openwrt-sdk-ramips-mt7621_gcc-13.3.0_musl.Linux-aarch64.tar.zst -C /build --strip-components=1        
+        echo src-link local /build/openwrt-feed >> feeds.conf.default
+        ./scripts/feeds update packages base local
+        ./scripts/feeds install mss-nfqws
+        make defconfig
+        time make package/mss-nfqws/compile
+        cp bin/packages/*/local/mss-nfqws*.ipk /out
+      '
